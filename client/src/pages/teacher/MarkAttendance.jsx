@@ -1,0 +1,146 @@
+import React, { useEffect, useState } from 'react';
+import api from '../../services/api';
+import Loader from '../../components/Loader.jsx';
+
+const todayStr = () => new Date().toISOString().slice(0, 10);
+
+const MarkAttendance = () => {
+  const [subjects, setSubjects] = useState([]);
+  const [subject, setSubject] = useState('');
+  const [date, setDate] = useState(todayStr());
+  const [students, setStudents] = useState([]);
+  const [statusMap, setStatusMap] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState('');
+
+  useEffect(() => {
+    api.get('/teachers/me').then((res) => {
+      setSubjects(res.data.data.subjects || []);
+      if (res.data.data.subjects?.length) setSubject(res.data.data.subjects[0]._id);
+      setLoading(false);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!subject) return;
+    const load = async () => {
+      const [studentsRes, existingRes] = await Promise.all([
+        api.get('/teachers/me/students', { params: { subject } }),
+        api.get('/attendance', { params: { subject, date } }),
+      ]);
+      setStudents(studentsRes.data.data);
+      const map = {};
+      studentsRes.data.data.forEach((s) => (map[s._id] = 'present'));
+      existingRes.data.data.forEach((r) => (map[r.student._id] = r.status));
+      setStatusMap(map);
+    };
+    load();
+  }, [subject, date]);
+
+  const toggle = (studentId, status) => {
+    setStatusMap((prev) => ({ ...prev, [studentId]: status }));
+  };
+
+  const markAllPresent = () => {
+    const map = {};
+    students.forEach((s) => (map[s._id] = 'present'));
+    setStatusMap(map);
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    setMessage('');
+    try {
+      const records = students.map((s) => ({ student: s._id, status: statusMap[s._id] || 'present' }));
+      await api.post('/attendance', { subject, date, records });
+      setMessage('Attendance saved successfully.');
+    } catch (err) {
+      setMessage(err.response?.data?.message || 'Failed to save attendance');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) return <Loader />;
+
+  return (
+    <div className="space-y-6">
+      <h1 className="text-xl font-semibold text-gray-900 dark:text-gray-100">Mark Attendance</h1>
+
+      <div className="card flex flex-col sm:flex-row gap-4 sm:items-end">
+        <div className="flex-1">
+          <label className="label">Subject</label>
+          <select className="input-field" value={subject} onChange={(e) => setSubject(e.target.value)}>
+            {subjects.map((s) => (
+              <option key={s._id} value={s._id}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="flex-1">
+          <label className="label">Date</label>
+          <input type="date" className="input-field" value={date} onChange={(e) => setDate(e.target.value)} max={todayStr()} />
+        </div>
+        <button onClick={markAllPresent} className="btn-secondary whitespace-nowrap">
+          Mark all present
+        </button>
+      </div>
+
+      {message && <div className="text-sm text-primary-600 bg-primary-50 dark:bg-primary-500/10 px-3 py-2 rounded-lg">{message}</div>}
+
+      <div className="card overflow-x-auto">
+        {students.length === 0 ? (
+          <p className="text-sm text-gray-500">No students found for this subject.</p>
+        ) : (
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-gray-500 dark:text-gray-400 border-b border-gray-100 dark:border-gray-700">
+                <th className="py-2 pr-4">Roll No.</th>
+                <th className="py-2 pr-4">Name</th>
+                <th className="py-2 pr-4">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {students.map((s) => (
+                <tr key={s._id} className="border-b border-gray-50 dark:border-gray-700/50">
+                  <td className="py-2 pr-4 text-gray-600 dark:text-gray-400">{s.rollNumber}</td>
+                  <td className="py-2 pr-4 text-gray-800 dark:text-gray-200">{s.user?.name}</td>
+                  <td className="py-2 pr-4">
+                    <div className="inline-flex rounded-lg overflow-hidden border border-gray-200 dark:border-gray-600">
+                      <button
+                        onClick={() => toggle(s._id, 'present')}
+                        className={`px-3 py-1 text-xs font-medium ${
+                          statusMap[s._id] === 'present' ? 'bg-green-500 text-white' : 'bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300'
+                        }`}
+                      >
+                        Present
+                      </button>
+                      <button
+                        onClick={() => toggle(s._id, 'absent')}
+                        className={`px-3 py-1 text-xs font-medium ${
+                          statusMap[s._id] === 'absent' ? 'bg-red-500 text-white' : 'bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300'
+                        }`}
+                      >
+                        Absent
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {students.length > 0 && (
+        <button onClick={handleSave} disabled={saving} className="btn-primary">
+          {saving ? 'Saving...' : 'Save Attendance'}
+        </button>
+      )}
+    </div>
+  );
+};
+
+export default MarkAttendance;
